@@ -1,0 +1,41 @@
+// theme/tokens.ts
+export const tokens = {
+  color: {
+    ink: '#1C2A39',
+    paper: '#FBF4E8',
+    sand: '#F1E4CE',
+    coral: '#C9472F',
+    lagoon: '#14707A',
+    sun: '#F2B544',
+    sage: '#4C7A4F',
+    muted: '#59636E',
+    danger: '#A8321F',
+    line: 'rgba(28,42,57,.14)',
+    scrim: 'rgba(28,42,57,.35)',
+    panel: 'rgba(251,244,232,.92)',
+  },
+  font: {
+    display: "'Bricolage Grotesque', system-ui, sans-serif",
+    body: "'Figtree', system-ui, sans-serif",
+    dyslexic: "'Atkinson Hyperlegible', system-ui, sans-serif",
+  },
+  size: {
+    caption: 12,
+    small: 14,
+    body: 16,
+    dialogue: 22,
+    h3: 20,
+    h2: 24,
+    h1: 40,
+    display: 56,
+  },
+  space: [0, 4, 8, 12, 16, 24, 32, 48],
+  radius: { input: 10, panel: 18, dock: 28, pill: 999 },
+  shadow: {
+    e1: '0 10px 28px rgba(28,42,57,.22)',
+    e2: '0 18px 48px rgba(28,42,57,.30)',
+  },
+  blur: { panel: 12 },
+  motion: { fast: 160, panel: 280, camera: 600 },
+  hud: { margin: 24, marginMobile: 12, maxCoverage: 0.18, dockMaxHeight: 0.34, dockMaxWidth: 880 },
+} as const;
