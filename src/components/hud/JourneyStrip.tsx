@@ -13,7 +13,7 @@ export const JourneyStrip: React.FC = () => {
   return (
     <div
       onClick={() => setOverlay("journey")}
-      className="cursor-pointer group inline-flex items-center gap-3 px-3.5 py-2 rounded-2xl paper-glass hover:shadow-md transition-all select-none"
+      className="cursor-pointer group inline-flex max-w-full items-center gap-1.5 px-2 py-1.5 sm:gap-3 sm:px-3.5 sm:py-2 rounded-2xl paper-glass hover:shadow-md transition-all select-none"
       title="Click to view full 7-day Journey map"
       role="button"
       tabIndex={0}
@@ -21,10 +21,12 @@ export const JourneyStrip: React.FC = () => {
         if (e.key === "Enter" || e.key === " ") setOverlay("journey");
       }}
     >
-      <Logo variant="mark" size={26} />
+      <span className="hidden sm:inline-flex">
+        <Logo variant="mark" size={26} />
+      </span>
 
       {/* 7 Progress Nodes */}
-      <div className="flex items-center gap-1.5">
+      <div className="hidden sm:flex items-center gap-1.5">
         {[1, 2, 3, 4, 5, 6, 7].map((dayNum, idx) => {
           const isDone = saveState.completedDays.includes(dayNum);
           const isCurrent = dayNum === currentDay;
@@ -75,11 +77,11 @@ export const JourneyStrip: React.FC = () => {
         })}
       </div>
 
-      <div className="h-4 w-px bg-line" />
+      <div className="hidden sm:block h-4 w-px bg-line" />
 
       {/* Title */}
-      <div className="text-xs font-semibold text-ink group-hover:text-coral transition-colors flex items-center gap-1">
-        <span>{currentScenario?.chapterTitle || `Day ${currentDay}`}</span>
+      <div className="min-w-0 text-[11px] sm:text-xs font-semibold text-ink group-hover:text-coral transition-colors flex items-center gap-1">
+        <span className="truncate max-w-[105px] sm:max-w-none">{currentScenario?.chapterTitle || `Day ${currentDay}`}</span>
         <span className="text-muted text-[10px]">▾</span>
       </div>
     </div>

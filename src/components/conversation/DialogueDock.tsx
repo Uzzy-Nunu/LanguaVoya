@@ -87,9 +87,8 @@ export const DialogueDock: React.FC = () => {
   const lastNpcTurn = [...activeConversation.turns].reverse().find((t) => t.speaker === "npc");
 
   return (
-    /* Side panel: right side, full height, doesn't cover the 3D scene on the left */
-    <div className="fixed top-0 right-0 h-full w-[380px] max-w-[42vw] z-30 flex flex-col pointer-events-auto">
-      <div className="m-3 mt-16 flex-1 flex flex-col paper-glass-strong rounded-2xl border border-line shadow-e2 overflow-hidden">
+    <div className="fixed inset-x-0 bottom-0 z-30 flex h-[min(62dvh,620px)] w-full flex-col pointer-events-auto sm:inset-y-0 sm:left-auto sm:right-0 sm:h-full sm:w-[380px] sm:max-w-[42vw]">
+      <div className="m-1.5 mt-0 flex min-h-0 flex-1 flex-col paper-glass-strong rounded-t-2xl border border-line shadow-e2 overflow-hidden sm:m-3 sm:mt-16 sm:rounded-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-line shrink-0 bg-paper/60">
           <div className="flex items-center gap-2">

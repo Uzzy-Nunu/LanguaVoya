@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { Check, ChevronDown, ChevronUp, MapPin, Circle, ArrowRight } from "lucide-react";
 
@@ -8,6 +8,17 @@ export const ObjectiveCard: React.FC = () => {
   const [collapsed, setCollapsed] = useState(false);
   const { saveState, advanceToNextDay } = useGame();
   const currentScenario = saveState.scenarios[saveState.currentDay];
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 639px)");
+    const collapseForMobile = () => {
+      if (mobileViewport.matches) setCollapsed(true);
+    };
+    collapseForMobile();
+    mobileViewport.addEventListener("change", collapseForMobile);
+    return () => mobileViewport.removeEventListener("change", collapseForMobile);
+  }, []);
+
   if (!currentScenario) return null;
 
   const currentTask = currentScenario.tasks.find((t) => t.status === "current");

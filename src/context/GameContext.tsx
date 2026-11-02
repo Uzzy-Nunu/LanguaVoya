@@ -31,7 +31,7 @@ const INITIAL_SAVE: PlayerSaveState = {
   cefrLevel: "A1",
   currentDay: 1,
   currentLocation: "apartment",
-  playerCoords: [-19.4, 0, 19.3],
+  playerCoords: [-18.4, 0, 13.2],
   playerRotation: -Math.PI * 0.75,
   money: 25, // 25 euros starting balance
   inventory: [
@@ -176,11 +176,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
           const parsed = JSON.parse(stored);
-          // If stored playerCoords is stuck inside building wall or far on Day 1, update to porch
-          if (parsed.currentDay === 1 && (!parsed.playerCoords || parsed.playerCoords[2] < 17.5 || parsed.playerCoords[2] > 21)) {
-            parsed.playerCoords = [-19.4, 0, 19.3];
-            parsed.playerRotation = -Math.PI * 0.75;
-          }
           setSaveState(parsed);
           setHasSaveData(true);
         }
@@ -738,11 +733,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       const npcStartCoords: Record<number, [number, number, number]> = {
-        1: [-19.4, 0, 19.3],
-        2: [15.2, 0, 16.2],
+        1: [-18.4, 0, 13.2],
+        2: [15.2, 0, 11.2],
         3: [26.8, 0, -6.8],
         4: [-8.8, 0, -10.3],
-        5: [-19.4, 0, 19.3],
+        5: [-18.4, 0, 13.2],
         6: [16.2, 0, -15.8],
         7: [-19.4, 0, 19.3],
       };
@@ -784,11 +779,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const npcStartCoords: Record<number, [number, number, number]> = {
-      1: [-19.4, 0, 19.3],
-      2: [15.2, 0, 16.2],
+      1: [-18.4, 0, 13.2],
+      2: [15.2, 0, 11.2],
       3: [26.8, 0, -6.8],
       4: [-8.8, 0, -10.3],
-      5: [-19.4, 0, 19.3],
+      5: [-18.4, 0, 13.2],
       6: [16.2, 0, -15.8],
       7: [-19.4, 0, 19.3],
     };

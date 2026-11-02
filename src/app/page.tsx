@@ -77,7 +77,7 @@ function GameApp() {
   return (
     <>
       <main
-        className={`relative w-screen h-screen overflow-hidden ${
+        className={`relative w-screen h-screen h-[100dvh] overflow-hidden ${
           saveState.settings.dyslexicFont ? "font-dyslexic" : ""
         }`}
       >
@@ -86,25 +86,31 @@ function GameApp() {
 
         {/* 2. Persistent HUD Layer (HUD area ≤ 18% viewport, non-blocking) */}
         <div
-          className={`absolute inset-0 pointer-events-none p-3 sm:p-5 flex flex-col justify-between select-none ${
-            gameMode === "conversation" ? "pr-[400px]" : ""
+          className={`absolute inset-0 pointer-events-none p-2 sm:p-5 flex flex-col justify-between select-none ${
+            gameMode === "conversation" ? "sm:pr-[400px]" : ""
           }`}
         >
           {/* Top Bar: Journey Strip (Left) & Menu Cluster (Right) */}
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex flex-col gap-2.5 pointer-events-auto">
-              <JourneyStrip />
-              {gameMode === "world" && <ObjectiveCard />}
+          <div>
+            <div className="flex items-start justify-between gap-2 sm:gap-3">
+              <div className="min-w-0 pointer-events-auto">
+                <JourneyStrip />
+              </div>
+              <div className="pointer-events-auto">
+                <MenuCluster />
+              </div>
             </div>
-            <div className="pointer-events-auto">
-              <MenuCluster />
-            </div>
+            {gameMode === "world" && (
+              <div className="pointer-events-auto mt-2">
+                <ObjectiveCard />
+              </div>
+            )}
           </div>
 
           {/* Bottom Bar: Phrase Tray (Left) & Controls Hint (Right) in World Mode */}
           {gameMode === "world" && (
-            <div className="flex items-end justify-between gap-3">
-              <div className="pointer-events-auto">
+            <div className="flex items-end justify-between gap-3 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+              <div className="pointer-events-auto ml-auto sm:ml-0">
                 <PhraseTray />
               </div>
               <div className="hidden sm:block pointer-events-auto">

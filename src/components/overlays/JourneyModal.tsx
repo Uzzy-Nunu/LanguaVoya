@@ -49,7 +49,7 @@ export const JourneyModal: React.FC = () => {
 
         {/* 7-Day Nodes Strip */}
         <div className="py-2 px-3 bg-sand/40 border border-line rounded-2xl mb-4 overflow-x-auto">
-          <div className="flex items-center justify-between min-w-[580px] gap-2">
+          <div className="flex items-center justify-between min-w-max sm:min-w-0 gap-1 sm:gap-2">
             {[1, 2, 3, 4, 5, 6, 7].map((dayNum) => {
               const done = saveState.completedDays.includes(dayNum);
               const current = dayNum === saveState.currentDay;

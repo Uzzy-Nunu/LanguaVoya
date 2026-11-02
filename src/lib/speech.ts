@@ -6,11 +6,52 @@ const LANG_CODES: Record<TargetLanguage, string> = {
   fr: "fr-FR",
   es: "es-ES",
   it: "it-IT",
-  en: "en-US",
+  en: "en-GB",
+};
+
+let voiceListChecked = false;
+let voiceListWait: Promise<void> | null = null;
+
+const getPreferredVoice = async (locale: string): Promise<SpeechSynthesisVoice | undefined> => {
+  const synthesis = window.speechSynthesis;
+  const findVoice = () => {
+    const voices = synthesis.getVoices();
+    const normalizedLocale = locale.toLowerCase();
+    const language = normalizedLocale.split("-")[0];
+    return voices.find((voice) => voice.lang.toLowerCase() === normalizedLocale) ||
+      voices.find((voice) => voice.lang.toLowerCase() === language) ||
+      voices.find((voice) => voice.lang.toLowerCase().startsWith(`${language}-`));
+  };
+
+  const availableVoice = findVoice();
+  if (availableVoice) return availableVoice;
+
+  if (!voiceListChecked) {
+    if (!voiceListWait) {
+      voiceListWait = new Promise((resolve) => {
+        let timeoutId: number;
+        const finish = () => {
+          window.clearTimeout(timeoutId);
+          synthesis.removeEventListener("voiceschanged", handleVoicesChanged);
+          resolve();
+        };
+        const handleVoicesChanged = () => finish();
+        synthesis.addEventListener("voiceschanged", handleVoicesChanged, { once: true });
+        timeoutId = window.setTimeout(finish, 1200);
+      });
+    }
+
+    await voiceListWait;
+    voiceListChecked = true;
+    voiceListWait = null;
+  }
+
+  return findVoice();
 };
 
 class AudioService {
   private ctx: AudioContext | null = null;
+  private speechGeneration = 0;
 
   private getContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -98,28 +139,36 @@ class AudioService {
         return;
       }
 
-      window.speechSynthesis.cancel(); // Stop any pending speech
+      const synthesis = window.speechSynthesis;
+      const generation = ++this.speechGeneration;
+      synthesis.cancel();
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = LANG_CODES[language] || "fr-FR";
+      utterance.lang = LANG_CODES[language] || LANG_CODES.fr;
       utterance.rate = rate;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      utterance.onend = finish;
+      utterance.onerror = finish;
 
-      // Select matching native voice if available
-      const voices = window.speechSynthesis.getVoices();
-      const matchingVoice = voices.find((v) => v.lang.startsWith(language));
-      if (matchingVoice) {
-        utterance.voice = matchingVoice;
-      }
-
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
-
-      window.speechSynthesis.speak(utterance);
+      void getPreferredVoice(utterance.lang).then((voice) => {
+        if (settled || generation !== this.speechGeneration) {
+          finish();
+          return;
+        }
+        if (voice) utterance.voice = voice;
+        synthesis.speak(utterance);
+      });
     });
   }
 
   stopSpeech() {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      this.speechGeneration += 1;
       window.speechSynthesis.cancel();
     }
   }

@@ -80,7 +80,7 @@ export const CHARACTERS: CharacterProfile[] = [
     displayName: "Étienne",
     role: "Neighbourhood Grocer",
     locationId: "grocery",
-    coords: [14, 0, 15],
+    coords: [14, 0, 10.5],
     rotation: -Math.PI / 3,
     avatarColor: "#14707A",
     personality: "Cheerful, proud of his fresh produce, loves when customers use polite forms.",

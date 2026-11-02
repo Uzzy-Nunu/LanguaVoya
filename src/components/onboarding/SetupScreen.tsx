@@ -36,10 +36,10 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gradient-to-br from-[#1C2A39] via-[#2A3B4C] to-[#14707A] select-none">
-      <div className="w-full max-w-4xl paper-glass-strong rounded-3xl p-6 sm:p-8 text-ink shadow-e2 border border-line flex flex-col md:flex-row gap-6">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-gradient-to-br from-[#1C2A39] via-[#2A3B4C] to-[#14707A] p-2 select-none sm:items-center sm:p-4">
+      <div className="my-auto flex max-h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col gap-3 overflow-y-auto overscroll-contain rounded-2xl border border-line p-3 text-ink shadow-e2 paper-glass-strong sm:gap-6 sm:rounded-3xl sm:p-8 md:flex-row">
         {/* Left Col: Selections */}
-        <div className="flex-1 space-y-5">
+        <div className="flex-1 space-y-3 sm:space-y-5">
           <div>
             <span className="text-xs font-bold text-coral uppercase tracking-wider block mb-1">
               Personalise Your Experience
@@ -78,14 +78,14 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
                   <button
                     key={lang.id}
                     onClick={() => setTargetLang(lang.id)}
-                    className={`p-3 rounded-2xl border text-left transition-all flex items-start justify-between ${
+                    className={`flex items-start justify-between rounded-2xl border p-2 text-left transition-all sm:p-3 ${
                       selected
                         ? "bg-paper border-coral shadow-xs ring-2 ring-coral/20"
                         : "bg-paper/60 border-line hover:bg-paper"
                     }`}
                   >
                     <div>
-                      <span className="text-xl mb-1 block">{lang.flag}</span>
+                      <span className="mb-0.5 block text-lg sm:mb-1 sm:text-xl">{lang.flag}</span>
                       <div className="font-bold text-sm text-ink">{lang.label}</div>
                       <div className="text-[11px] text-muted">{lang.location}</div>
                     </div>
@@ -105,21 +105,21 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
             <label className="text-xs font-bold text-ink uppercase tracking-wider block mb-2">
               My current level
             </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
               {levels.map((lvl) => {
                 const selected = level === lvl.id;
                 return (
                   <button
                     key={lvl.id}
                     onClick={() => setLevel(lvl.id)}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                    className={`rounded-xl border p-2 text-left transition-all sm:p-2.5 ${
                       selected
                         ? "bg-paper border-lagoon shadow-xs ring-2 ring-lagoon/20"
                         : "bg-paper/60 border-line hover:bg-paper"
                     }`}
                   >
-                    <div className="font-bold text-xs text-ink">{lvl.title}</div>
-                    <div className="text-[10px] text-muted mt-0.5 leading-snug">{lvl.desc}</div>
+                    <div className="text-[11px] font-bold leading-tight text-ink sm:text-xs">{lvl.title}</div>
+                    <div className="mt-0.5 text-[9px] leading-snug text-muted sm:text-[10px]">{lvl.desc}</div>
                   </button>
                 );
               })}
@@ -144,12 +144,12 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
         </div>
 
         {/* Right Col: Seven Days Preview */}
-        <div className="w-full md:w-64 bg-sand/30 border border-line rounded-2xl p-4 flex flex-col justify-between">
+        <div className="flex w-full flex-col justify-between rounded-2xl border border-line bg-sand/30 p-3 sm:p-4 md:w-64">
           <div>
             <span className="text-[10px] font-bold text-muted uppercase tracking-wider block mb-3">
               Your Seven Days
             </span>
-            <div className="space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px] sm:flex sm:flex-col sm:gap-0 sm:space-y-2 sm:text-xs">
               {[
                 "🚪 Day 1 · Arrival",
                 "🧺 Day 2 · Groceries",
@@ -172,7 +172,7 @@ export const SetupScreen: React.FC<SetupScreenProps> = ({
 
           <button
             onClick={() => onComplete(targetLang, level, interfaceLang, playerName.trim() || "Alex")}
-            className="w-full mt-4 py-3 rounded-2xl bg-coral text-paper font-bold text-sm shadow-md hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2"
+            className="sticky bottom-0 mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-coral py-3 text-sm font-bold text-paper shadow-md transition-all hover:scale-[1.02] active:scale-95"
           >
             <span>Continue</span>
             <ArrowRight size={16} />

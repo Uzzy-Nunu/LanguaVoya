@@ -127,12 +127,19 @@ export class SceneManager {
 
   // Player & Movement
   public playerMesh!: THREE.Group;
-  public playerPosition = new THREE.Vector3(-19.4, 0, 19.3);
+  public playerPosition = new THREE.Vector3(-18.4, 0, 13.2);
   public playerRotation = -Math.PI * 0.75;
   private targetPosition: THREE.Vector3 | null = null;
   private moveSpeed = 6.5; // units per second
   private isWalking = false;
   private walkClock = 0;
+  private directionalInputs = new Map<string, THREE.Vector2>();
+  private playerSaveElapsed = 0;
+  private lastReportedPlayerPosition: THREE.Vector3 | null = null;
+  private lastNearNpcId: string | null | undefined;
+  private lastProjectedAnchors: ProjectedAnchor[] = [];
+  private proximityUpdateElapsed = 0;
+  private anchorUpdateElapsed = 0;
 
   // Camera rigs
   public cameraMode: "follow" | "conversation" = "follow";
@@ -153,6 +160,17 @@ export class SceneManager {
   private groundPlane!: THREE.Mesh;
   private npcMeshes: Map<string, THREE.Group> = new Map();
   private npcRingMeshes: Map<string, THREE.Mesh> = new Map();
+  private apartmentExteriorGroup!: THREE.Group;
+  private apartmentInteriorGroup!: THREE.Group;
+  private ambientPedestrians: Array<{
+    mesh: THREE.Group;
+    route: THREE.Vector3[];
+    waypoint: number;
+    speed: number;
+    phase: number;
+  }> = [];
+  private buildingBounds: Array<{ minX: number; maxX: number; minZ: number; maxZ: number }> = [];
+  private apartmentBounds = { minX: -26.5, maxX: -13.5, minZ: 6.5, maxZ: 17.5 };
 
   // Raycaster
   private raycaster = new THREE.Raycaster();
@@ -162,6 +180,62 @@ export class SceneManager {
   private onNpcNearCallback?: (npc: CharacterProfile | null) => void;
   private onAnchorUpdateCallback?: (anchors: ProjectedAnchor[]) => void;
   private onPlayerMoveCallback?: (coords: [number, number, number], rot: number) => void;
+
+  private handlePointerDown = (event: PointerEvent) => {
+    if (this.cameraMode === "conversation" || (event.button !== 0 && event.pointerType === "mouse")) return;
+
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    const intersects = this.raycaster.intersectObject(this.groundPlane);
+    if (intersects.length === 0) return;
+
+    const point = intersects[0].point;
+    const destination = new THREE.Vector3(point.x, 0, point.z);
+    if (this.canOccupy(destination.x, destination.z)) this.targetPosition = destination;
+
+    this.clickIndicator.position.set(point.x, 0.06, point.z);
+    (this.clickIndicator.material as THREE.MeshBasicMaterial).opacity = 0.85;
+  };
+
+  private handleKeyDown = (event: KeyboardEvent) => {
+    if (this.cameraMode === "conversation" || this.isEditableTarget(event.target)) return;
+
+    const key = event.key.toLowerCase();
+    const directions: Record<string, [number, number]> = {
+      w: [0, -1],
+      arrowup: [0, -1],
+      s: [0, 1],
+      arrowdown: [0, 1],
+      a: [-1, 0],
+      arrowleft: [-1, 0],
+      d: [1, 0],
+      arrowright: [1, 0],
+    };
+    const direction = directions[key];
+    if (!direction) return;
+
+    event.preventDefault();
+    this.setDirectionalInput(`keyboard:${key}`, direction[0], direction[1], true);
+  };
+
+  private handleKeyUp = (event: KeyboardEvent) => {
+    const key = event.key.toLowerCase();
+    this.setDirectionalInput(`keyboard:${key}`, 0, 0, false);
+  };
+
+  private handleWindowBlur = () => {
+    this.directionalInputs.clear();
+    this.targetPosition = null;
+    this.notifyPlayerPosition(true);
+  };
+
+  private isEditableTarget(target: EventTarget | null) {
+    return target instanceof HTMLElement &&
+      (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+  }
 
   constructor(
     private container: HTMLElement,
@@ -173,7 +247,7 @@ export class SceneManager {
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
 
-    this.camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 150);
+    this.camera = new THREE.PerspectiveCamera(width < 640 ? 52 : 45, width / height, 0.1, 150);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(width, height);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -185,6 +259,7 @@ export class SceneManager {
     this.initLighting();
     this.initWorld();
     this.initCharacters();
+    this.initAmbientPedestrians();
     this.initPlayer();
     this.initClickIndicator();
     this.initParticles();
@@ -235,6 +310,18 @@ export class SceneManager {
   }
 
   public setDayLighting(day: number) {
+    this.dayNumber = day;
+    this.cameraOffset.set(11, 15, day === 2 ? -17 : 17);
+    const apartmentInteriorActive = day === 1 || day === 5;
+    this.apartmentInteriorGroup.visible = apartmentInteriorActive;
+    this.apartmentExteriorGroup.visible = !apartmentInteriorActive;
+    const landlady = CHARACTERS.find((character) => character.id === "mme_laurent");
+    if (landlady) {
+      const position = this.getCharacterPosition(landlady);
+      this.npcMeshes.get(landlady.id)?.position.copy(position);
+      this.npcRingMeshes.get(landlady.id)?.position.set(position.x, 0.05, position.z);
+    }
+
     if (day === 6) {
       // Day 6: Dusk party
       this.scene.background = new THREE.Color("#2C2440");
@@ -389,6 +476,7 @@ export class SceneManager {
       chimney.castShadow = true;
       house.add(chimney);
       this.scene.add(house);
+      this.buildingBounds.push({ minX: x - 4.6, maxX: x + 4.6, minZ: z - 4.1, maxZ: z + 4.1 });
     });
   }
 
@@ -516,6 +604,7 @@ export class SceneManager {
   private buildApartment() {
     const group = new THREE.Group();
     group.position.set(-20, 0, 12);
+    this.apartmentExteriorGroup = group;
 
     // Main building stucco block
     const main = new THREE.Mesh(
@@ -578,6 +667,74 @@ export class SceneManager {
     });
 
     this.scene.add(group);
+    this.buildingBounds.push(this.apartmentBounds);
+
+    const room = new THREE.Group();
+    room.position.set(-20, 0, 12);
+    this.apartmentInteriorGroup = room;
+    const floor = new THREE.Mesh(
+      new THREE.BoxGeometry(8, 0.18, 8),
+      new THREE.MeshStandardMaterial({ color: "#B98D68", roughness: 0.88 })
+    );
+    floor.position.set(0, 0.05, 0);
+    floor.receiveShadow = true;
+    room.add(floor);
+
+    const wallMaterial = new THREE.MeshStandardMaterial({ color: "#F1DCC2", roughness: 0.92 });
+    const sideWall = new THREE.Mesh(new THREE.BoxGeometry(0.25, 3.4, 8), wallMaterial);
+    sideWall.position.set(-3.9, 1.75, 0);
+    sideWall.castShadow = true;
+    room.add(sideWall);
+    const backWall = new THREE.Mesh(new THREE.BoxGeometry(8, 3.4, 0.25), wallMaterial);
+    backWall.position.set(0, 1.75, -3.9);
+    backWall.castShadow = true;
+    room.add(backWall);
+    const trim = new THREE.MeshStandardMaterial({ color: "#8F5C42", roughness: 0.8 });
+    const rug = new THREE.Mesh(
+      new THREE.BoxGeometry(3.2, 0.06, 2.3),
+      new THREE.MeshStandardMaterial({ color: "#A9574C", roughness: 0.95 })
+    );
+    rug.position.set(0, 0.17, 0.25);
+    room.add(rug);
+
+    const table = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.16, 0.85), trim);
+    table.position.set(1.8, 0.95, -1.3);
+    table.castShadow = true;
+    room.add(table);
+    [-0.65, 0.65].forEach((x) => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.95, 0.12), trim);
+      leg.position.set(1.8 + x, 0.48, -1.3);
+      room.add(leg);
+    });
+
+    const sofa = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.72, 0.9),
+      new THREE.MeshStandardMaterial({ color: "#4F7770", roughness: 0.9 })
+    );
+    sofa.position.set(-1.5, 0.48, -2.35);
+    sofa.castShadow = true;
+    room.add(sofa);
+    const sofaBack = new THREE.Mesh(
+      new THREE.BoxGeometry(2.4, 0.8, 0.22),
+      new THREE.MeshStandardMaterial({ color: "#416960", roughness: 0.9 })
+    );
+    sofaBack.position.set(-1.5, 1.05, -2.7);
+    room.add(sofaBack);
+
+    const lamp = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.1, 1.45, 8),
+      trim
+    );
+    lamp.position.set(3.1, 0.82, -2.7);
+    room.add(lamp);
+    const lampShade = new THREE.Mesh(
+      new THREE.ConeGeometry(0.42, 0.52, 8, 1, true),
+      new THREE.MeshStandardMaterial({ color: "#E6C98D", side: THREE.DoubleSide })
+    );
+    lampShade.position.set(3.1, 1.75, -2.7);
+    room.add(lampShade);
+
+    this.scene.add(room);
   }
 
   private buildGroceryStore() {
@@ -637,6 +794,7 @@ export class SceneManager {
     });
 
     this.scene.add(group);
+    this.buildingBounds.push({ minX: 8, maxX: 20, minZ: 12.5, maxZ: 23.5 });
   }
 
   private buildTransitStop() {
@@ -764,6 +922,7 @@ export class SceneManager {
     });
 
     this.scene.add(group);
+    this.buildingBounds.push({ minX: -16.5, maxX: -3.5, minZ: -27, maxZ: -12 });
   }
 
   private buildCommunityHall() {
@@ -800,6 +959,7 @@ export class SceneManager {
     });
 
     this.scene.add(group);
+    this.buildingBounds.push({ minX: 9, maxX: 23, minZ: -34, maxZ: -17 });
   }
 
   private initTrees() {
@@ -844,7 +1004,7 @@ export class SceneManager {
     const hairTones = ["#4B3027", "#302821", "#6A4836", "#3A3430", "#5B382B"];
     CHARACTERS.forEach((char, index) => {
       const npcGroup = new THREE.Group();
-      npcGroup.position.set(...char.coords);
+      npcGroup.position.copy(this.getCharacterPosition(char));
       npcGroup.rotation.y = char.rotation;
       addDetailedHumanoid(
         npcGroup,
@@ -884,9 +1044,75 @@ export class SceneManager {
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.rotation.x = -Math.PI / 2;
-      ring.position.set(char.coords[0], 0.05, char.coords[2]);
+      const position = this.getCharacterPosition(char);
+      ring.position.set(position.x, 0.05, position.z);
       this.scene.add(ring);
       this.npcRingMeshes.set(char.id, ring);
+
+      if (char.id === "mme_laurent") {
+        const keyMaterial = new THREE.MeshStandardMaterial({
+          color: "#D8B65F",
+          metalness: 0.75,
+          roughness: 0.32,
+        });
+        const keyRing = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.025, 6, 12), keyMaterial);
+        keyRing.position.set(0.51, 1.02, 0.13);
+        npcGroup.add(keyRing);
+        const key = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.28, 0.045), keyMaterial);
+        key.position.set(0.62, 0.9, 0.13);
+        npcGroup.add(key);
+        const tooth = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.045, 0.045), keyMaterial);
+        tooth.position.set(0.67, 0.82, 0.13);
+        npcGroup.add(tooth);
+      }
+    });
+  }
+
+  private getCharacterPosition(character: CharacterProfile) {
+    if (character.id === "mme_laurent" && (this.dayNumber === 1 || this.dayNumber === 5)) {
+      return new THREE.Vector3(-21.2, 0, 13.2);
+    }
+    return new THREE.Vector3(...character.coords);
+  }
+
+  private initAmbientPedestrians() {
+    const outfits = [
+      ["#3E6678", "#D7A17A", "#302821", "#D9B66E"],
+      ["#A85742", "#E6B891", "#6A4836", "#E8D9C6"],
+      ["#70804B", "#C98F6D", "#3A3430", "#D5B875"],
+      ["#7C5A83", "#F2D1AE", "#5B382B", "#B6C7A0"],
+      ["#C69B45", "#F1C7A5", "#4B3027", "#E3B95C"],
+      ["#527A76", "#D7A17A", "#302821", "#E8D9C6"],
+    ];
+    const routes = [
+      [new THREE.Vector3(-2.8, 0, -31), new THREE.Vector3(-2.8, 0, -12), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-4.8, 0, 31), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-2.8, 0, -12)],
+      [new THREE.Vector3(4.8, 0, 31), new THREE.Vector3(4.8, 0, -31)],
+      [new THREE.Vector3(-2.8, 0, -27), new THREE.Vector3(-2.8, 0, -12), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-4.8, 0, 27), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-2.8, 0, -12)],
+      [new THREE.Vector3(4.8, 0, 27), new THREE.Vector3(4.8, 0, -27)],
+      [new THREE.Vector3(-2.8, 0, 30), new THREE.Vector3(-2.8, 0, -12), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-4.8, 0, 30), new THREE.Vector3(-4.8, 0, -10), new THREE.Vector3(-2.8, 0, -12)],
+      [new THREE.Vector3(4.8, 0, -30), new THREE.Vector3(4.8, 0, 30)],
+    ];
+
+    outfits.forEach((outfit, index) => {
+      const mesh = new THREE.Group();
+      addDetailedHumanoid(mesh, outfit[0], outfit[1], outfit[2], outfit[3]);
+      mesh.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.castShadow = false;
+          object.receiveShadow = false;
+        }
+      });
+      const route = routes[index];
+      mesh.position.copy(route[0]);
+      mesh.position.z += index % 2 === 0 ? -index * 1.6 : index * 1.6;
+      this.scene.add(mesh);
+      this.ambientPedestrians.push({
+        mesh,
+        route,
+        waypoint: 1,
+        speed: 1.1 + (index % 3) * 0.18,
+        phase: index * 1.7,
+      });
     });
   }
 
@@ -939,51 +1165,10 @@ export class SceneManager {
 
   private setupEventListeners() {
     const canvas = this.renderer.domElement;
-
-    // Click / Tap to move
-    canvas.addEventListener("pointerdown", (e) => {
-      // Ignore if clicking on conversation or UI overlay
-      if (this.cameraMode === "conversation") return;
-
-      const rect = canvas.getBoundingClientRect();
-      this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      this.mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-      const intersects = this.raycaster.intersectObject(this.groundPlane);
-
-      if (intersects.length > 0) {
-        const point = intersects[0].point;
-        this.targetPosition = new THREE.Vector3(point.x, 0, point.z);
-
-        // Animate click indicator
-        this.clickIndicator.position.set(point.x, 0.06, point.z);
-        (this.clickIndicator.material as THREE.MeshBasicMaterial).opacity = 0.85;
-      }
-    });
-
-    // WASD keyboard movement
-    window.addEventListener("keydown", (e) => {
-      if (this.cameraMode === "conversation") return;
-      const key = e.key.toLowerCase();
-      let dx = 0;
-      let dz = 0;
-
-      if (key === "w" || key === "arrowup") dz -= 1;
-      if (key === "s" || key === "arrowdown") dz += 1;
-      if (key === "a" || key === "arrowleft") dx -= 1;
-      if (key === "d" || key === "arrowright") dx += 1;
-
-      if (dx !== 0 || dz !== 0) {
-        const len = Math.sqrt(dx * dx + dz * dz);
-        const step = 1.2;
-        this.targetPosition = new THREE.Vector3(
-          this.playerPosition.x + (dx / len) * step,
-          0,
-          this.playerPosition.z + (dz / len) * step
-        );
-      }
-    });
+    canvas.addEventListener("pointerdown", this.handlePointerDown);
+    window.addEventListener("keydown", this.handleKeyDown);
+    window.addEventListener("keyup", this.handleKeyUp);
+    window.addEventListener("blur", this.handleWindowBlur);
 
     // Resize
     window.addEventListener("resize", this.handleResize);
@@ -994,6 +1179,7 @@ export class SceneManager {
     const width = this.container.clientWidth;
     const height = this.container.clientHeight;
     this.camera.aspect = width / height;
+    this.camera.fov = width < 640 ? 52 : 45;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(width, height);
   };
@@ -1012,16 +1198,18 @@ export class SceneManager {
     this.cameraMode = mode;
     this.activeNpcTarget = targetNpc || null;
     if (mode === "conversation" && targetNpc) {
+      this.directionalInputs.clear();
       this.targetPosition = null; // stop player walking
 
       // Ensure player stands together with the NPC facing each other
-      const npcPos = new THREE.Vector3(...targetNpc.coords);
+      const npcPos = this.getCharacterPosition(targetNpc);
       const dist = this.playerPosition.distanceTo(npcPos);
       if (dist > 2.2 || dist < 0.9) {
         // Conversational stance ~1.6m away
         const conversationOffset = new THREE.Vector3(1.1, 0, 1.1);
         this.playerPosition.copy(npcPos).add(conversationOffset);
         this.playerMesh.position.copy(this.playerPosition);
+        this.notifyPlayerPosition(true);
       }
       // Rotate player to face NPC directly
       const toNpc = npcPos.clone().sub(this.playerPosition).normalize();
@@ -1031,43 +1219,108 @@ export class SceneManager {
   }
 
   public teleportPlayer(x: number, z: number) {
-    this.playerPosition.set(x, 0, z);
+    const resolved = this.resolvePosition(x, z);
+    this.playerPosition.set(resolved.x, 0, resolved.z);
     this.targetPosition = null;
     this.playerMesh.position.copy(this.playerPosition);
+    this.lastReportedPlayerPosition = this.playerPosition.clone();
+  }
+
+  public movePlayerBy(dx: number, dz: number) {
+    if (this.cameraMode === "conversation") return;
+    const length = Math.hypot(dx, dz) || 1;
+    this.targetPosition = new THREE.Vector3(
+      this.playerPosition.x + (dx / length) * 2.4,
+      0,
+      this.playerPosition.z + (dz / length) * 2.4
+    );
+  }
+
+  public setDirectionalInput(inputId: string, dx: number, dz: number, active: boolean) {
+    if (this.cameraMode === "conversation") return;
+    if (active) {
+      this.directionalInputs.set(inputId, new THREE.Vector2(dx, dz));
+      this.targetPosition = null;
+    } else {
+      this.directionalInputs.delete(inputId);
+      if (this.directionalInputs.size === 0) this.notifyPlayerPosition(true);
+    }
+  }
+
+  private canOccupy(x: number, z: number) {
+    if (Math.abs(x) > 56 || Math.abs(z) > 56) return false;
+    const apartmentInteriorActive = this.dayNumber === 1 || this.dayNumber === 5;
+    return !this.buildingBounds.some((bounds) => {
+      if (apartmentInteriorActive && bounds === this.apartmentBounds && this.isApartmentInteriorAccessible(x, z)) {
+        return false;
+      }
+      return x > bounds.minX - 0.45 && x < bounds.maxX + 0.45 &&
+        z > bounds.minZ - 0.45 && z < bounds.maxZ + 0.45;
+    });
+  }
+
+  private isApartmentInteriorAccessible(x: number, z: number) {
+    const insideRoom = x >= -23.45 && x <= -16.55 && z >= 8.55 && z <= 15.45;
+    const inDoorway = x >= -21.1 && x <= -18.9 && z > 15.45 && z < this.apartmentBounds.maxZ + 0.45;
+    return insideRoom || inDoorway;
+  }
+
+  private resolvePosition(x: number, z: number) {
+    if (this.canOccupy(x, z)) return new THREE.Vector3(x, 0, z);
+    const safeX = THREE.MathUtils.clamp(x, -55, 55);
+    const safeZ = THREE.MathUtils.clamp(z, -55, 55);
+    let resolvedX = safeX;
+    let resolvedZ = safeZ;
+    for (const bounds of this.buildingBounds) {
+      if ((this.dayNumber === 1 || this.dayNumber === 5) &&
+        bounds === this.apartmentBounds &&
+        this.isApartmentInteriorAccessible(resolvedX, resolvedZ)) continue;
+      if (resolvedX > bounds.minX - 0.45 && resolvedX < bounds.maxX + 0.45 &&
+          resolvedZ > bounds.minZ - 0.45 && resolvedZ < bounds.maxZ + 0.45) {
+        const edges = [
+          { x: bounds.minX - 0.46, z: resolvedZ },
+          { x: bounds.maxX + 0.46, z: resolvedZ },
+          { x: resolvedX, z: bounds.minZ - 0.46 },
+          { x: resolvedX, z: bounds.maxZ + 0.46 },
+        ];
+        const nearest = edges.reduce((best, edge) =>
+          Math.hypot(edge.x - x, edge.z - z) < Math.hypot(best.x - x, best.z - z) ? edge : best
+        );
+        resolvedX = nearest.x;
+        resolvedZ = nearest.z;
+      }
+    }
+    return new THREE.Vector3(resolvedX, 0, resolvedZ);
   }
 
   private updateMovement(delta: number) {
-    if (this.targetPosition) {
-      const distance = this.playerPosition.distanceTo(this.targetPosition);
+    this.playerSaveElapsed += delta;
+    const heldDirection = new THREE.Vector2();
+    this.directionalInputs.forEach((direction) => heldDirection.add(direction));
 
+    if (heldDirection.lengthSq() > 0) {
+      heldDirection.normalize();
+      this.targetPosition = null;
+      this.advancePlayer(heldDirection.x, heldDirection.y, delta);
+    } else if (this.targetPosition) {
+      const direction = this.targetPosition.clone().sub(this.playerPosition);
+      const distance = direction.length();
       if (distance > 0.15) {
-        this.isWalking = true;
-        this.walkClock += delta * 12;
-
-        const moveDir = this.targetPosition.clone().sub(this.playerPosition).normalize();
-        this.playerPosition.add(moveDir.clone().multiplyScalar(Math.min(this.moveSpeed * delta, distance)));
-
-        // Rotate player toward move direction
-        this.playerRotation = Math.atan2(moveDir.x, moveDir.z);
-        this.playerMesh.rotation.y = this.playerRotation;
-
-        // Walking bob animation
-        this.playerMesh.position.set(
-          this.playerPosition.x,
-          Math.sin(this.walkClock) * 0.08,
-          this.playerPosition.z
-        );
-
-        this.onPlayerMoveCallback?.([this.playerPosition.x, 0, this.playerPosition.z], this.playerRotation);
+        direction.normalize();
+        this.advancePlayer(direction.x, direction.z, delta, distance);
       } else {
-        this.isWalking = false;
+        this.playerPosition.copy(this.targetPosition);
+        this.playerMesh.position.copy(this.playerPosition);
         this.targetPosition = null;
-        this.playerMesh.position.y = 0;
+        this.isWalking = false;
+        this.notifyPlayerPosition(true);
       }
     } else {
       this.isWalking = false;
       this.playerMesh.position.y = 0;
     }
+
+    this.updateAmbientPedestrians(delta);
 
     // Fade click indicator
     const clickMat = this.clickIndicator.material as THREE.MeshBasicMaterial;
@@ -1080,14 +1333,86 @@ export class SceneManager {
     }
   }
 
+  private advancePlayer(dx: number, dz: number, delta: number, maxDistance = Number.POSITIVE_INFINITY) {
+    const length = Math.hypot(dx, dz);
+    if (length === 0) return;
+    const directionX = dx / length;
+    const directionZ = dz / length;
+    const stepDistance = Math.min(this.moveSpeed * delta, maxDistance);
+    const nextX = this.playerPosition.x + directionX * stepDistance;
+    const nextZ = this.playerPosition.z + directionZ * stepDistance;
+    const currentX = this.playerPosition.x;
+    const currentZ = this.playerPosition.z;
+
+    if (this.canOccupy(nextX, nextZ)) {
+      this.playerPosition.set(nextX, 0, nextZ);
+    } else {
+      if (this.canOccupy(nextX, this.playerPosition.z)) this.playerPosition.x = nextX;
+      if (this.canOccupy(this.playerPosition.x, nextZ)) this.playerPosition.z = nextZ;
+      if (this.playerPosition.x === currentX && this.playerPosition.z === currentZ) {
+        this.targetPosition = null;
+        if (this.directionalInputs.size === 0) this.notifyPlayerPosition(true);
+        return;
+      }
+    }
+
+    const actualX = this.playerPosition.x - currentX;
+    const actualZ = this.playerPosition.z - currentZ;
+    this.isWalking = true;
+    this.walkClock += delta * 12;
+    this.playerRotation = Math.atan2(actualX, actualZ);
+    this.playerMesh.rotation.y = this.playerRotation;
+    this.playerMesh.position.set(
+      this.playerPosition.x,
+      Math.sin(this.walkClock) * 0.08,
+      this.playerPosition.z
+    );
+    this.notifyPlayerPosition();
+  }
+
+  private notifyPlayerPosition(force = false) {
+    if (!this.onPlayerMoveCallback) return;
+    const distanceSinceReport = this.lastReportedPlayerPosition
+      ? this.lastReportedPlayerPosition.distanceTo(this.playerPosition)
+      : Number.POSITIVE_INFINITY;
+    if (distanceSinceReport < 0.01) return;
+    if (!force && this.playerSaveElapsed < 0.5 && distanceSinceReport < 0.5) return;
+
+    this.onPlayerMoveCallback(
+      [this.playerPosition.x, 0, this.playerPosition.z],
+      this.playerRotation
+    );
+    this.lastReportedPlayerPosition = this.playerPosition.clone();
+    this.playerSaveElapsed = 0;
+  }
+
+  private updateAmbientPedestrians(delta: number) {
+    this.ambientPedestrians.forEach((pedestrian) => {
+      const destination = pedestrian.route[pedestrian.waypoint];
+      const direction = destination.clone().sub(pedestrian.mesh.position);
+      const distance = direction.length();
+      if (distance < 0.35) {
+        pedestrian.waypoint = (pedestrian.waypoint + 1) % pedestrian.route.length;
+        return;
+      }
+
+      direction.normalize();
+      pedestrian.mesh.position.addScaledVector(direction, Math.min(pedestrian.speed * delta, distance));
+      pedestrian.mesh.rotation.y = Math.atan2(direction.x, direction.z);
+      pedestrian.phase += delta * 7;
+      pedestrian.mesh.position.y = Math.abs(Math.sin(pedestrian.phase)) * 0.045;
+    });
+  }
+
   private updateCamera(delta: number) {
     if (this.cameraMode === "conversation" && this.activeNpcTarget) {
-      // 3/4 overhead view framing both characters standing together in front of the house
-      const npcPos = new THREE.Vector3(...this.activeNpcTarget.coords);
+      // Frame both characters from the visible side of their current location.
+      const npcPos = this.getCharacterPosition(this.activeNpcTarget);
       const midpoint = this.playerPosition.clone().add(npcPos).multiplyScalar(0.5);
 
       // Elevated camera offset to the right so characters are centered in visible viewport area
-      const camTargetPos = midpoint.clone().add(new THREE.Vector3(2.0, 4.8, 5.5));
+      const cameraSide = this.activeNpcTarget.id === "etienne" ? -5.5 : 5.5;
+      const camTargetPos = midpoint.clone().add(new THREE.Vector3(2.0, 4.8, cameraSide));
       const lookTarget = midpoint.clone().add(new THREE.Vector3(-0.3, 1.1, 0));
 
       this.currentCameraPos.lerp(camTargetPos, delta * 3.5);
@@ -1109,8 +1434,9 @@ export class SceneManager {
     let closestNpc: CharacterProfile | null = null;
     let minDistance = 3.8;
 
-    CHARACTERS.forEach((char) => {
-      const charPos = new THREE.Vector3(...char.coords);
+    for (let index = 0; index < CHARACTERS.length; index += 1) {
+      const char = CHARACTERS[index];
+      const charPos = this.getCharacterPosition(char);
       const dist = this.playerPosition.distanceTo(charPos);
       const ringMesh = this.npcRingMeshes.get(char.id);
 
@@ -1134,9 +1460,12 @@ export class SceneManager {
           );
         }
       }
-    });
+    }
 
-    this.onNpcNearCallback?.(closestNpc);
+    if (closestNpc?.id !== this.lastNearNpcId) {
+      this.lastNearNpcId = closestNpc?.id ?? null;
+      this.onNpcNearCallback?.(closestNpc);
+    }
   }
 
   private updateProjectedAnchors() {
@@ -1146,7 +1475,7 @@ export class SceneManager {
 
     // NPC NameTags & Prompts
     CHARACTERS.forEach((char) => {
-      const charPos = new THREE.Vector3(...char.coords).add(new THREE.Vector3(0, 2.75, 0));
+      const charPos = this.getCharacterPosition(char).add(new THREE.Vector3(0, 2.75, 0));
       const dist = this.playerPosition.distanceTo(charPos);
       const screenPos = charPos.project(this.camera);
       let normalizedX = screenPos.x;
@@ -1164,7 +1493,12 @@ export class SceneManager {
         normalizedY > 0.78;
       const edgeX = THREE.MathUtils.clamp(normalizedX, -0.78, 0.78);
       const edgeY = THREE.MathUtils.clamp(normalizedY, -0.78, 0.78);
-      const safeX = THREE.MathUtils.clamp((edgeX * 0.5 + 0.5) * width, 88, Math.max(88, width - 88));
+      const horizontalPadding = Math.min(130, width / 2);
+      const safeX = THREE.MathUtils.clamp(
+        (edgeX * 0.5 + 0.5) * width,
+        horizontalPadding,
+        Math.max(horizontalPadding, width - horizontalPadding)
+      );
       const safeY = THREE.MathUtils.clamp((-(edgeY * 0.5) + 0.5) * height, 54, Math.max(54, height - 60));
 
       anchors.push({
@@ -1180,7 +1514,19 @@ export class SceneManager {
       });
     });
 
-    this.onAnchorUpdateCallback?.(anchors);
+    const changed = anchors.length !== this.lastProjectedAnchors.length ||
+      anchors.some((anchor, index) => {
+        const previous = this.lastProjectedAnchors[index];
+        return !previous || previous.id !== anchor.id ||
+          previous.offscreen !== anchor.offscreen ||
+          previous.distance !== anchor.distance ||
+          Math.abs(previous.x - anchor.x) > 2 ||
+          Math.abs(previous.y - anchor.y) > 2;
+      });
+    if (changed) {
+      this.lastProjectedAnchors = anchors;
+      this.onAnchorUpdateCallback?.(anchors);
+    }
   }
 
   private startLoop() {
@@ -1194,8 +1540,16 @@ export class SceneManager {
 
       this.updateMovement(delta);
       this.updateCamera(delta);
-      this.updateNpcProximity();
-      this.updateProjectedAnchors();
+      this.proximityUpdateElapsed += delta;
+      this.anchorUpdateElapsed += delta;
+      if (this.proximityUpdateElapsed >= 0.1) {
+        this.updateNpcProximity();
+        this.proximityUpdateElapsed = 0;
+      }
+      if (this.anchorUpdateElapsed >= 0.075) {
+        this.updateProjectedAnchors();
+        this.anchorUpdateElapsed = 0;
+      }
 
       // Subtle tree sway & particles drift
       if (this.treesGroup) {
@@ -1216,6 +1570,10 @@ export class SceneManager {
     if (this.animFrameId) {
       cancelAnimationFrame(this.animFrameId);
     }
+    this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
+    window.removeEventListener("keydown", this.handleKeyDown);
+    window.removeEventListener("keyup", this.handleKeyUp);
+    window.removeEventListener("blur", this.handleWindowBlur);
     window.removeEventListener("resize", this.handleResize);
     if (this.renderer.domElement.parentElement) {
       this.renderer.domElement.parentElement.removeChild(this.renderer.domElement);
